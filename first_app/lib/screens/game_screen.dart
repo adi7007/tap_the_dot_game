@@ -1,10 +1,15 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/high_score_manager.dart';
 import '../utils/sound_manager.dart';
 import '../utils/theme_manager.dart';
+import '../utils/vibration_manager.dart';
+import '../utils/achievement_manager.dart';
+import '../utils/settings_manager.dart';
 import '../models/game_result.dart';
+import '../models/game_settings.dart';
 import 'result_screen.dart';
 
 class GameScreen extends StatefulWidget {
@@ -24,12 +29,17 @@ class _GameScreenState extends State<GameScreen>
   int _totalTaps = 0;
   int _successfulTaps = 0;
   int _currentLevel = 1;
+  int _currentCombo = 0;
+  int _maxCombo = 0;
+  int _totalScore = 0;
+  int _gameStartTime = 0;
+  int _remainingTime = 0;
   
   // Timing
   late Stopwatch _reactionTimer;
   Timer? _dotSpawnTimer;
   Timer? _gameTimer;
-  final int _gameDuration = 30000; // 30 seconds
+  Timer? _countdownTimer;
   
   // Dot properties
   double _dotSize = 80.0;
@@ -42,6 +52,8 @@ class _GameScreenState extends State<GameScreen>
   late Animation<double> _dotOpacityAnimation;
   late AnimationController _glowAnimationController;
   late Animation<double> _glowAnimation;
+  late AnimationController _comboAnimationController;
+  late Animation<double> _comboScaleAnimation;
   
   // UI
   late AnimationController _uiAnimationController;
@@ -50,13 +62,27 @@ class _GameScreenState extends State<GameScreen>
   // Managers
   final SoundManager _soundManager = SoundManager();
   final ThemeManager _themeManager = ThemeManager();
+  final VibrationManager _vibrationManager = VibrationManager();
+  final AchievementManager _achievementManager = AchievementManager();
+  final SettingsManager _settingsManager = SettingsManager();
+  
+  late GameSettings _settings;
 
   @override
   void initState() {
     super.initState();
+    _settings = _settingsManager.settings;
     _reactionTimer = Stopwatch();
-    _soundManager.initialize();
-    
+    _initializeManagers();
+    _setupAnimations();
+  }
+
+  Future<void> _initializeManagers() async {
+    await _soundManager.initialize();
+    await _vibrationManager.initialize();
+  }
+
+  void _setupAnimations() {
     // Dot animation
     _dotAnimationController = AnimationController(
       duration: const Duration(milliseconds: 200),
@@ -90,6 +116,19 @@ class _GameScreenState extends State<GameScreen>
       curve: Curves.easeInOut,
     ));
     
+    // Combo animation
+    _comboAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _comboScaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.5,
+    ).animate(CurvedAnimation(
+      parent: _comboAnimationController,
+      curve: Curves.elasticOut,
+    ));
+    
     // UI animation
     _uiAnimationController = AnimationController(
       duration: const Duration(milliseconds: 1000),
@@ -110,9 +149,11 @@ class _GameScreenState extends State<GameScreen>
   void dispose() {
     _dotAnimationController.dispose();
     _glowAnimationController.dispose();
+    _comboAnimationController.dispose();
     _uiAnimationController.dispose();
     _dotSpawnTimer?.cancel();
     _gameTimer?.cancel();
+    _countdownTimer?.cancel();
     _soundManager.dispose();
     super.dispose();
   }
@@ -124,7 +165,11 @@ class _GameScreenState extends State<GameScreen>
       _totalTaps = 0;
       _successfulTaps = 0;
       _currentLevel = 1;
-      _dotSize = 80.0;
+      _currentCombo = 0;
+      _maxCombo = 0;
+      _totalScore = 0;
+      _dotSize = _settings.difficultyDotSize;
+      _gameStartTime = DateTime.now().millisecondsSinceEpoch;
     });
     
     _scheduleNextDot();
@@ -134,9 +179,15 @@ class _GameScreenState extends State<GameScreen>
   void _scheduleNextDot() {
     if (!_isGameStarted) return;
     
-    // Enhanced difficulty scaling
-    int minDelay = _calculateMinDelay();
-    int maxDelay = _calculateMaxDelay();
+    int minDelay = _settings.minSpawnDelay;
+    int maxDelay = _settings.maxSpawnDelay;
+    
+    // Adjust based on level
+    if (_currentLevel > 5) {
+      minDelay = max(300, minDelay - (_currentLevel - 5) * 50);
+      maxDelay = max(800, maxDelay - (_currentLevel - 5) * 50);
+    }
+    
     int delay = Random().nextInt(maxDelay - minDelay) + minDelay;
     
     _dotSpawnTimer = Timer(Duration(milliseconds: delay), () {
@@ -144,22 +195,6 @@ class _GameScreenState extends State<GameScreen>
         _spawnDot();
       }
     });
-  }
-
-  int _calculateMinDelay() {
-    // More aggressive scaling
-    if (_currentLevel <= 5) return max(800, 2500 - (_currentLevel * 200));
-    if (_currentLevel <= 10) return max(500, 1500 - ((_currentLevel - 5) * 100));
-    if (_currentLevel <= 15) return max(300, 1000 - ((_currentLevel - 10) * 50));
-    return max(200, 750 - ((_currentLevel - 15) * 25));
-  }
-
-  int _calculateMaxDelay() {
-    // More aggressive scaling
-    if (_currentLevel <= 5) return max(1200, 3500 - (_currentLevel * 200));
-    if (_currentLevel <= 10) return max(800, 2000 - ((_currentLevel - 5) * 100));
-    if (_currentLevel <= 15) return max(500, 1300 - ((_currentLevel - 10) * 50));
-    return max(300, 1000 - ((_currentLevel - 15) * 25));
   }
 
   void _spawnDot() {
@@ -184,7 +219,9 @@ class _GameScreenState extends State<GameScreen>
     _glowAnimationController.repeat(reverse: true);
     
     // Play spawn sound
-    _soundManager.playDotSpawn();
+    if (_settings.soundEnabled) {
+      _soundManager.playDotSpawn();
+    }
   }
 
   void _onDotTap() {
@@ -193,14 +230,37 @@ class _GameScreenState extends State<GameScreen>
     _reactionTimer.stop();
     _currentReactionTime = _reactionTimer.elapsedMilliseconds;
     
+    // Calculate score with combo multiplier
+    int baseScore = 100;
+    int comboMultiplier = _currentCombo > 0 ? _currentCombo : 1;
+    int score = baseScore * comboMultiplier;
+    
     setState(() {
       _isDotVisible = false;
       _totalTaps++;
       _successfulTaps++;
+      _currentCombo++;
+      _maxCombo = max(_maxCombo, _currentCombo);
+      _totalScore += score;
     });
     
-    // Play tap sound
-    _soundManager.playDotTap();
+    // Play tap sound and vibrate
+    if (_settings.soundEnabled) {
+      _soundManager.playDotTap();
+    }
+    if (_settings.vibrationEnabled) {
+      _vibrationManager.vibrateSuccess();
+    }
+    
+    // Show combo animation
+    if (_currentCombo > 1) {
+      _comboAnimationController.forward().then((_) {
+        _comboAnimationController.reverse();
+      });
+      if (_settings.vibrationEnabled) {
+        _vibrationManager.vibrateCombo(_currentCombo);
+      }
+    }
     
     _dotAnimationController.reverse().then((_) {
       _reactionTimer.reset();
@@ -212,20 +272,30 @@ class _GameScreenState extends State<GameScreen>
     _updateLevel();
   }
 
+  void _onMissedTap() {
+    setState(() {
+      _totalTaps++;
+      _currentCombo = 0; // Reset combo on miss
+    });
+    
+    if (_settings.vibrationEnabled) {
+      _vibrationManager.vibrateMiss();
+    }
+  }
+
   void _updateLevel() {
     int newLevel = _currentLevel;
     double newDotSize = _dotSize;
     
-    // Level up every 3 successful taps (more frequent)
+    // Level up every 3 successful taps
     if (_successfulTaps % 3 == 0) {
       newLevel++;
-      // More aggressive size reduction
-      newDotSize = max(25.0, _dotSize - 8.0);
+      newDotSize = max(25.0, _dotSize - 5.0);
     }
     
     // Additional size reduction every 10 taps
     if (_successfulTaps % 10 == 0) {
-      newDotSize = max(20.0, newDotSize - 5.0);
+      newDotSize = max(20.0, newDotSize - 3.0);
     }
     
     if (newLevel != _currentLevel || newDotSize != _dotSize) {
@@ -236,16 +306,34 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
-  void _onMissedTap() {
-    setState(() {
-      _totalTaps++;
-    });
-  }
-
   void _startGameTimer() {
-    _gameTimer = Timer(Duration(milliseconds: _gameDuration), () {
-      _endGame();
-    });
+    int gameDuration;
+    
+    switch (_settings.gameMode) {
+      case GameMode.classic:
+        gameDuration = 30000; // 30 seconds
+        break;
+      case GameMode.timer:
+        gameDuration = _settings.timerDuration * 1000;
+        break;
+      case GameMode.endless:
+        gameDuration = -1; // No time limit
+        break;
+    }
+    
+    if (gameDuration > 0) {
+      _remainingTime = gameDuration;
+      _countdownTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        if (_remainingTime > 0) {
+          setState(() {
+            _remainingTime -= 100;
+          });
+        } else {
+          timer.cancel();
+          _endGame();
+        }
+      });
+    }
   }
 
   void _endGame() {
@@ -257,12 +345,23 @@ class _GameScreenState extends State<GameScreen>
     
     _dotSpawnTimer?.cancel();
     _gameTimer?.cancel();
+    _countdownTimer?.cancel();
     _glowAnimationController.stop();
+    
+    if (_settings.vibrationEnabled) {
+      _vibrationManager.vibrateGameEnd();
+    }
+    
+    // Calculate game duration
+    int gameDuration = DateTime.now().millisecondsSinceEpoch - _gameStartTime;
     
     // Calculate average reaction time
     double averageReactionTime = _successfulTaps > 0 
         ? _currentReactionTime / _successfulTaps 
         : 0.0;
+    
+    // Calculate accuracy
+    double accuracy = _totalTaps > 0 ? (_successfulTaps / _totalTaps) * 100 : 0.0;
     
     // Save high score
     final gameResult = GameResult(
@@ -271,9 +370,16 @@ class _GameScreenState extends State<GameScreen>
       successfulTaps: _successfulTaps,
       level: _currentLevel,
       timestamp: DateTime.now(),
+      maxCombo: _maxCombo,
+      totalScore: _totalScore,
+      gameDuration: gameDuration,
+      difficulty: _settings.difficulty.toString().split('.').last,
+      gameMode: _settings.gameMode.toString().split('.').last,
+      accuracy: accuracy,
     );
     
     HighScoreManager().saveScore(gameResult);
+    _achievementManager.updateStats(gameResult);
     
     // Navigate to result screen
     Navigator.pushReplacement(
@@ -295,6 +401,65 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
+  Color _getDotColor() {
+    final colorData = SettingsManager.availableDotColors
+        .firstWhere((c) => c['value'] == _settings.dotColor);
+    return Color(colorData['color']);
+  }
+
+  Widget _buildAnimatedDot() {
+    Widget dot = Container(
+      width: _dotSize,
+      height: _dotSize,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _getDotColor(),
+        boxShadow: [
+          BoxShadow(
+            color: _getDotColor().withValues(alpha: 0.6 * _glowAnimation.value),
+            blurRadius: 20 * _glowAnimation.value,
+            spreadRadius: 5 * _glowAnimation.value,
+          ),
+        ],
+      ),
+      child: Icon(
+        Icons.circle,
+        color: Colors.white,
+        size: _dotSize * 0.7,
+      ),
+    );
+
+    // Apply custom animations based on settings
+    switch (_settings.dotAnimation) {
+      case DotAnimation.pulse:
+        dot = dot.animate(onPlay: (controller) => controller.repeat())
+            .scale(duration: 1.seconds, begin: const Offset(0.8, 0.8), end: const Offset(1.2, 1.2))
+            .then()
+            .scale(duration: 1.seconds, begin: const Offset(1.2, 1.2), end: const Offset(0.8, 0.8));
+        break;
+      case DotAnimation.bounce:
+        dot = dot.animate(onPlay: (controller) => controller.repeat())
+            .moveY(duration: 1.seconds, begin: 0, end: -10)
+            .then()
+            .moveY(duration: 1.seconds, begin: -10, end: 0);
+        break;
+      case DotAnimation.rotate:
+        dot = dot.animate(onPlay: (controller) => controller.repeat())
+            .rotate(duration: 2.seconds, begin: 0, end: 1);
+        break;
+      case DotAnimation.fade:
+        dot = dot.animate(onPlay: (controller) => controller.repeat())
+            .fadeIn(duration: 1.seconds)
+            .then()
+            .fadeOut(duration: 1.seconds);
+        break;
+      case DotAnimation.none:
+        break;
+    }
+
+    return dot;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = _themeManager.currentTheme;
@@ -312,65 +477,174 @@ class _GameScreenState extends State<GameScreen>
                 opacity: _uiFadeAnimation,
                 child: Container(
                   padding: const EdgeInsets.all(20),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
                     children: [
-                      // Level indicator with theme color
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: _themeManager.getLevelColor(_currentLevel).withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: _themeManager.getLevelColor(_currentLevel).withValues(alpha: 0.5),
-                            width: 1,
+                      // Timer (for timer mode)
+                      if (_settings.gameMode == GameMode.timer && _isGameStarted)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.red.withValues(alpha: 0.5),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.timer,
+                                color: Colors.red,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${(_remainingTime / 1000).ceil()}s',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.trending_up,
-                              color: _themeManager.getLevelColor(_currentLevel),
-                              size: 16,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Level $_currentLevel',
-                              style: TextStyle(
-                                color: theme.textColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                      
+                      const SizedBox(height: 8),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Level indicator
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _themeManager.getLevelColor(_currentLevel).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: _themeManager.getLevelColor(_currentLevel).withValues(alpha: 0.5),
+                                width: 1,
                               ),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.trending_up,
+                                  color: _themeManager.getLevelColor(_currentLevel),
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Level $_currentLevel',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Score indicator
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: theme.primaryColor.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: theme.primaryColor.withValues(alpha: 0.5),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.score,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$_totalScore',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Combo indicator
+                          if (_currentCombo > 1)
+                            ScaleTransition(
+                              scale: _comboScaleAnimation,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.amber.withValues(alpha: 0.5),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.flash_on,
+                                      color: Colors.amber,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '${_currentCombo}x',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       
-                      // Score indicator
+                      const SizedBox(height: 8),
+                      
+                      // Accuracy indicator
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
-                          color: theme.primaryColor.withValues(alpha: 0.2),
+                          color: Colors.white.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: theme.primaryColor.withValues(alpha: 0.5),
+                            color: Colors.white.withValues(alpha: 0.2),
                             width: 1,
                           ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.score,
-                              color: theme.primaryColor,
+                            const Icon(
+                              Icons.gps_fixed,
+                              color: Colors.white,
                               size: 16,
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '$_successfulTaps/$_totalTaps',
-                              style: TextStyle(
-                                color: theme.textColor,
+                              '$_successfulTaps/$_totalTaps (${_totalTaps > 0 ? (_successfulTaps / _totalTaps * 100).toStringAsFixed(1) : "0.0"}%)',
+                              style: const TextStyle(
+                                color: Colors.white,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                               ),
@@ -424,26 +698,7 @@ class _GameScreenState extends State<GameScreen>
                                     child: AnimatedBuilder(
                                       animation: _glowAnimation,
                                       builder: (context, child) {
-                                        return Container(
-                                          width: _dotSize,
-                                          height: _dotSize,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: _themeManager.getDotColor(_currentLevel),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: _themeManager.getDotColor(_currentLevel).withValues(alpha: 0.6 * _glowAnimation.value),
-                                                blurRadius: 20 * _glowAnimation.value,
-                                                spreadRadius: 5 * _glowAnimation.value,
-                                              ),
-                                            ],
-                                          ),
-                                          child: Icon(
-                                            Icons.circle,
-                                            color: theme.textColor,
-                                            size: _dotSize * 0.7,
-                                          ),
-                                        );
+                                        return _buildAnimatedDot();
                                       },
                                     ),
                                   ),
@@ -465,7 +720,7 @@ class _GameScreenState extends State<GameScreen>
                                     style: TextStyle(
                                       fontSize: 32,
                                       fontWeight: FontWeight.bold,
-                                      color: theme.textColor,
+                                      color: Colors.white,
                                       shadows: [
                                         Shadow(
                                           offset: const Offset(2, 2),
@@ -491,7 +746,7 @@ class _GameScreenState extends State<GameScreen>
                                   style: TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
-                                    color: theme.textColor,
+                                    color: Colors.white,
                                     shadows: [
                                       Shadow(
                                         offset: const Offset(2, 2),
@@ -505,7 +760,7 @@ class _GameScreenState extends State<GameScreen>
                                 ElevatedButton(
                                   onPressed: _startGame,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: theme.textColor,
+                                    backgroundColor: Colors.white,
                                     foregroundColor: theme.primaryColor,
                                     padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
                                     shape: RoundedRectangleBorder(
@@ -551,7 +806,7 @@ class AnimatedBackgroundPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = theme.textColor.withValues(alpha: 0.05)
+      ..color = Colors.white.withValues(alpha: 0.05)
       ..strokeWidth = 1.0;
     
     // Animated grid pattern

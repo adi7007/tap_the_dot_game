@@ -28,7 +28,6 @@ class SoundManager {
       await _spawnPlayer.play(AssetSource('sounds/dot_spawn.wav'));
     } catch (e) {
       // Silently handle errors for placeholder files
-      print('Sound play error: $e');
     }
   }
 
@@ -38,7 +37,6 @@ class SoundManager {
       await _tapPlayer.play(AssetSource('sounds/dot_tap.wav'));
     } catch (e) {
       // Silently handle errors for placeholder files
-      print('Sound play error: $e');
     }
   }
 

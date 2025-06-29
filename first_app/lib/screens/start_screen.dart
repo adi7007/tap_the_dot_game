@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import '../utils/theme_manager.dart';
+import '../utils/achievement_manager.dart';
+import '../utils/settings_manager.dart';
+import '../utils/vibration_manager.dart';
 import 'game_screen.dart';
 import 'high_scores_screen.dart';
+import 'settings_screen.dart';
+import 'achievements_screen.dart';
 
 class StartScreen extends StatefulWidget {
   const StartScreen({super.key});
@@ -20,6 +25,9 @@ class _StartScreenState extends State<StartScreen>
   late Animation<double> _themeAnimation;
   
   final ThemeManager _themeManager = ThemeManager();
+  final AchievementManager _achievementManager = AchievementManager();
+  final SettingsManager _settingsManager = SettingsManager();
+  final VibrationManager _vibrationManager = VibrationManager();
 
   @override
   void initState() {
@@ -77,6 +85,7 @@ class _StartScreenState extends State<StartScreen>
   }
 
   void _switchTheme() {
+    _vibrationManager.vibrateButtonPress();
     _themeController.forward().then((_) {
       setState(() {
         _themeManager.nextTheme();
@@ -85,9 +94,91 @@ class _StartScreenState extends State<StartScreen>
     });
   }
 
+  void _navigateToGame() {
+    _vibrationManager.vibrateButtonPress();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const GameScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  void _navigateToHighScores() {
+    _vibrationManager.vibrateButtonPress();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const HighScoresScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  void _navigateToSettings() {
+    _vibrationManager.vibrateButtonPress();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const SettingsScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.0, 1.0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  void _navigateToAchievements() {
+    _vibrationManager.vibrateButtonPress();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const AchievementsScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.0, 1.0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = _themeManager.currentTheme;
+    final settings = _settingsManager.settings;
     
     return Scaffold(
       body: AnimatedBuilder(
@@ -101,32 +192,101 @@ class _StartScreenState extends State<StartScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Theme switcher
+                  // Top bar with theme switcher and achievements
                   FadeTransition(
                     opacity: _fadeAnimation,
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: IconButton(
-                          onPressed: _switchTheme,
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: theme.textColor.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: theme.textColor.withValues(alpha: 0.3),
-                                width: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Achievements button
+                          IconButton(
+                            onPressed: _navigateToAchievements,
+                            icon: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: theme.textColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: theme.textColor.withValues(alpha: 0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Stack(
+                                children: [
+                                  Icon(
+                                    Icons.emoji_events,
+                                    color: theme.textColor,
+                                    size: 24,
+                                  ),
+                                  if (_achievementManager.unlockedAchievements.isNotEmpty)
+                                    Positioned(
+                                      right: 0,
+                                      top: 0,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(2),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.amber,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Text(
+                                          '${_achievementManager.unlockedAchievements.length}',
+                                          style: const TextStyle(
+                                            fontSize: 8,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                            child: Icon(
-                              Icons.palette,
-                              color: theme.textColor,
-                              size: 24,
+                          ),
+                          
+                          // Settings button
+                          IconButton(
+                            onPressed: _navigateToSettings,
+                            icon: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: theme.textColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: theme.textColor.withValues(alpha: 0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.settings,
+                                color: theme.textColor,
+                                size: 24,
+                              ),
                             ),
                           ),
-                        ),
+                          
+                          // Theme switcher
+                          IconButton(
+                            onPressed: _switchTheme,
+                            icon: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: theme.textColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: theme.textColor.withValues(alpha: 0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.palette,
+                                color: theme.textColor,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -165,25 +325,50 @@ class _StartScreenState extends State<StartScreen>
                         
                         const SizedBox(height: 8),
                         
-                        // Theme name
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: theme.accentColor.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(15),
-                            border: Border.all(
-                              color: theme.accentColor.withValues(alpha: 0.5),
-                              width: 1,
+                        // Game mode and difficulty indicator
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: theme.accentColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(
+                                  color: theme.accentColor.withValues(alpha: 0.5),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                _getGameModeName(settings.gameMode),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.accentColor,
+                                ),
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            theme.name,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: theme.accentColor,
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: theme.primaryColor.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(
+                                  color: theme.primaryColor.withValues(alpha: 0.5),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                _getDifficultyName(settings.difficulty),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.primaryColor,
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -221,7 +406,7 @@ class _StartScreenState extends State<StartScreen>
                     ),
                   ),
                   
-                  const SizedBox(height: 80),
+                  const SizedBox(height: 60),
                   
                   // Start Game Button with enhanced styling
                   FadeTransition(
@@ -238,25 +423,7 @@ class _StartScreenState extends State<StartScreen>
                         ],
                       ),
                       child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            PageRouteBuilder(
-                              pageBuilder: (context, animation, secondaryAnimation) =>
-                                  const GameScreen(),
-                              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                return SlideTransition(
-                                  position: Tween<Offset>(
-                                    begin: const Offset(1.0, 0.0),
-                                    end: Offset.zero,
-                                  ).animate(animation),
-                                  child: child,
-                                );
-                              },
-                              transitionDuration: const Duration(milliseconds: 300),
-                            ),
-                          );
-                        },
+                        onPressed: _navigateToGame,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: theme.textColor,
                           foregroundColor: theme.primaryColor,
@@ -279,49 +446,70 @@ class _StartScreenState extends State<StartScreen>
                   
                   const SizedBox(height: 20),
                   
-                  // High Scores Button with enhanced styling
+                  // Menu buttons row
                   FadeTransition(
                     opacity: _fadeAnimation,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(25),
-                        border: Border.all(
-                          color: theme.textColor.withValues(alpha: 0.3),
-                          width: 2,
-                        ),
-                      ),
-                      child: TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            PageRouteBuilder(
-                              pageBuilder: (context, animation, secondaryAnimation) =>
-                                  const HighScoresScreen(),
-                              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                return FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                );
-                              },
-                              transitionDuration: const Duration(milliseconds: 300),
-                            ),
-                          );
-                        },
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                          shape: RoundedRectangleBorder(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // High Scores Button
+                        Container(
+                          decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(25),
+                            border: Border.all(
+                              color: theme.textColor.withValues(alpha: 0.3),
+                              width: 2,
+                            ),
+                          ),
+                          child: TextButton(
+                            onPressed: _navigateToHighScores,
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(25),
+                              ),
+                            ),
+                            child: Text(
+                              'High Scores',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: theme.textColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
                         ),
-                        child: Text(
-                          'High Scores',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: theme.textColor,
-                            fontWeight: FontWeight.w500,
+                        
+                        const SizedBox(width: 16),
+                        
+                        // Settings Button
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(25),
+                            border: Border.all(
+                              color: theme.textColor.withValues(alpha: 0.3),
+                              width: 2,
+                            ),
+                          ),
+                          child: TextButton(
+                            onPressed: _navigateToSettings,
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(25),
+                              ),
+                            ),
+                            child: Text(
+                              'Settings',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: theme.textColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                   
@@ -388,6 +576,16 @@ class _StartScreenState extends State<StartScreen>
                               fontWeight: FontWeight.w500,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Unlock achievements • Build combos • Beat your records!',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.primaryColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -399,5 +597,31 @@ class _StartScreenState extends State<StartScreen>
         },
       ),
     );
+  }
+
+  String _getGameModeName(dynamic gameMode) {
+    switch (gameMode.toString()) {
+      case 'GameMode.classic':
+        return 'Classic';
+      case 'GameMode.timer':
+        return 'Timer';
+      case 'GameMode.endless':
+        return 'Endless';
+      default:
+        return 'Classic';
+    }
+  }
+
+  String _getDifficultyName(dynamic difficulty) {
+    switch (difficulty.toString()) {
+      case 'DifficultyLevel.easy':
+        return 'Easy';
+      case 'DifficultyLevel.medium':
+        return 'Medium';
+      case 'DifficultyLevel.hard':
+        return 'Hard';
+      default:
+        return 'Medium';
+    }
   }
 } 

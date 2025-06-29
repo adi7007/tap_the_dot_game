@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/start_screen.dart';
+import 'utils/achievement_manager.dart';
+import 'utils/settings_manager.dart';
+import 'utils/vibration_manager.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize managers
+  await AchievementManager().initialize();
+  await SettingsManager().initialize();
+  await VibrationManager().initialize();
+  
   runApp(const TapTheDotGame());
 }
 
